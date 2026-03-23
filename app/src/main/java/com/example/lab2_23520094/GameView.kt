@@ -5,6 +5,7 @@ import android.graphics.*
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import androidx.core.graphics.scale
 import java.util.*
 
 class GameView(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
@@ -15,12 +16,12 @@ class GameView(context: Context, attrs: AttributeSet? = null) : View(context, at
 
     private var gameState = GameState.START
 
-    private var birdBitmap: Bitmap
-    private var backgroundBitmap: Bitmap
-    private var titleBitmap: Bitmap
-    private var playButtonBitmap: Bitmap
-    private var pipeBitmap: Bitmap
-    private var pipeInvertedBitmap: Bitmap
+    private val birdBitmap: Bitmap
+    private val backgroundBitmap: Bitmap
+    private val titleBitmap: Bitmap
+    private val playButtonBitmap: Bitmap
+    private val pipeBitmap: Bitmap
+    private val pipeInvertedBitmap: Bitmap
 
     private var birdY = 0f
     private var birdVelocity = 0f
@@ -43,10 +44,18 @@ class GameView(context: Context, attrs: AttributeSet? = null) : View(context, at
         setShadowLayer(10f, 0f, 0f, Color.BLACK)
     }
 
+    // Preallocate objects to avoid allocation in onDraw
+    private val birdRect = RectF()
+    private val topPipeSrc = Rect()
+    private val topPipeDest = RectF()
+    private val bottomPipeSrc = Rect()
+    private val bottomPipeDest = RectF()
+    private val bgDestRect = Rect()
+
     init {
         // 1. Load ảnh Chim (Avatar của bạn)
         val avatarImg = BitmapFactory.decodeResource(resources, R.drawable.my_avatar)
-        birdBitmap = Bitmap.createScaledBitmap(avatarImg, birdSize, birdSize, true)
+        birdBitmap = avatarImg.scale(birdSize, birdSize, true)
 
         // 2. Load các assets giao diện
         backgroundBitmap = BitmapFactory.decodeResource(resources, R.drawable.background)
@@ -56,7 +65,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : View(context, at
         // 3. Xử lý Ống nước (Xoay ngược cho ống trên)
         val originalPipe = BitmapFactory.decodeResource(resources, R.drawable.greenpipe)
         // Scale ống dài ra để không bị hở khi màn hình cao
-        pipeBitmap = Bitmap.createScaledBitmap(originalPipe, pipeWidth.toInt(), 1500, true)
+        pipeBitmap = originalPipe.scale(pipeWidth.toInt(), 1500, true)
 
         val matrix = Matrix()
         matrix.postRotate(180f)
@@ -82,8 +91,8 @@ class GameView(context: Context, attrs: AttributeSet? = null) : View(context, at
         super.onDraw(canvas)
 
         // Vẽ Background
-        val destRect = Rect(0, 0, width, height)
-        canvas.drawBitmap(backgroundBitmap, null, destRect, null)
+        bgDestRect.set(0, 0, width, height)
+        canvas.drawBitmap(backgroundBitmap, null, bgDestRect, null)
 
         when (gameState) {
             GameState.START -> drawStartScreen(canvas)
@@ -118,15 +127,14 @@ class GameView(context: Context, attrs: AttributeSet? = null) : View(context, at
             val pipe = iterator.next()
 
             // Vẽ Ống TRÊN (Đã lật ngược)
-            // Lấy phần đuôi của bitmap lật ngược (đầu ống) để vẽ từ cạnh trên màn hình xuống
-            val topPipeSrc = Rect(0, pipeInvertedBitmap.height - pipe.topHeight.toInt(), pipeInvertedBitmap.width, pipeInvertedBitmap.height)
-            val topPipeDest = RectF(pipe.x, 0f, pipe.x + pipeWidth, pipe.topHeight)
+            topPipeSrc.set(0, pipeInvertedBitmap.height - pipe.topHeight.toInt(), pipeInvertedBitmap.width, pipeInvertedBitmap.height)
+            topPipeDest.set(pipe.x, 0f, pipe.x + pipeWidth, pipe.topHeight)
             canvas.drawBitmap(pipeInvertedBitmap, topPipeSrc, topPipeDest, null)
 
             // Vẽ Ống DƯỚI
             val bottomPipeHeight = height - (pipe.topHeight + pipeGap)
-            val bottomPipeSrc = Rect(0, 0, pipeBitmap.width, bottomPipeHeight.toInt())
-            val bottomPipeDest = RectF(pipe.x, pipe.topHeight + pipeGap, pipe.x + pipeWidth, height.toFloat())
+            bottomPipeSrc.set(0, 0, pipeBitmap.width, bottomPipeHeight.toInt())
+            bottomPipeDest.set(pipe.x, pipe.topHeight + pipeGap, pipe.x + pipeWidth, height.toFloat())
             canvas.drawBitmap(pipeBitmap, bottomPipeSrc, bottomPipeDest, null)
 
             if (gameState == GameState.RUNNING) {
@@ -138,7 +146,7 @@ class GameView(context: Context, attrs: AttributeSet? = null) : View(context, at
                 }
 
                 // Va chạm
-                val birdRect = RectF(150f, birdY, 150f + birdSize, birdY + birdSize)
+                birdRect.set(150f, birdY, 150f + birdSize, birdY + birdSize)
                 if (RectF.intersects(birdRect, topPipeDest) || RectF.intersects(birdRect, bottomPipeDest) || birdY < 0 || birdY > height) {
                     gameState = GameState.GAME_OVER
                 }
@@ -166,7 +174,12 @@ class GameView(context: Context, attrs: AttributeSet? = null) : View(context, at
             typeface = Typeface.DEFAULT_BOLD
         }
         canvas.drawText("GAME OVER", width / 2f, height / 2f - 50f, goPaint)
-        canvas.drawText("TAP TO RESTART", width / 2f, height / 2f + 100f, scorePaint.apply { textSize = 70f; color = Color.YELLOW })
+        
+        val restartPaint = Paint(scorePaint).apply {
+            textSize = 70f
+            color = Color.YELLOW
+        }
+        canvas.drawText("TAP TO RESTART", width / 2f, height / 2f + 100f, restartPaint)
     }
 
     private fun updateLogic() {
@@ -174,8 +187,14 @@ class GameView(context: Context, attrs: AttributeSet? = null) : View(context, at
         birdY += birdVelocity
     }
 
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.action == MotionEvent.ACTION_DOWN) {
+            performClick()
             when (gameState) {
                 GameState.START -> { resetGame(); gameState = GameState.RUNNING }
                 GameState.RUNNING -> birdVelocity = jumpStrength
